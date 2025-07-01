@@ -39,18 +39,18 @@ jobs:
         kubectl rollout restart deployment/nginx-deployment
         kubectl rollout status deployment/nginx-deployment
 
-    - name: Setup port forwarding
+    - name: Setup port forwarding with socat
       run: |
-        # Kill any existing port-forward on 8080
-        pkill -f "port-forward.*8080" || true
+        # Install socat
+        sudo apt install -y socat
+        
+        # Kill any existing processes on port 8080
+        sudo pkill -f "8080" || true
         sleep 2
         
-        # Start kubectl port-forward in background
-        nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
-        disown
+        # Start socat to forward port 8080 to minikube NodePort 30080
+        nohup socat TCP-LISTEN:8080,fork,reuseaddr,bind=0.0.0.0 TCP:$(minikube ip):30080 &
         
-        # Wait for port-forward to start
+        # Wait and test
         sleep 5
-        
-        # Test it works
         curl http://localhost:8080
