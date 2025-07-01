@@ -69,17 +69,7 @@ sudo install minikube-linux-amd64 /usr/local/bin/minikube
 minikube version
 ```
 
-### 5. Install socat (for port forwarding)
-
-```bash
-# Install socat
-sudo apt install -y socat
-
-# Verify installation
-socat -V
-```
-
-### 6. Start Minikube
+### 5. Start Minikube
 
 ```bash
 # Start minikube with docker driver
@@ -93,7 +83,7 @@ kubectl get nodes
 minikube status
 ```
 
-### 7. GitHub Runner Setup
+### 6. GitHub Runner Setup
 
 #### Overview
 You'll need to set up a self-hosted GitHub runner on your server to enable the CI/CD pipeline.
@@ -124,30 +114,30 @@ sudo ./svc.sh install
 sudo ./svc.sh start
 ```
 
-### 8. Configure GitHub Secrets
+### 7. Configure GitHub Secrets
 
 Add the following secrets to your GitHub repository (Settings → Secrets and variables → Actions):
 
 - `DOCKER_USERNAME`: Your Docker Hub username
 - `DOCKER_PASSWORD`: Your Docker Hub password/token
 
-### 9. Network Access Configuration
+### 8. Network Access Configuration
 
-The GitHub Actions workflow automatically sets up external access using socat on port 8080.
+The GitHub Actions workflow automatically sets up port forwarding using iptables rules.
 
 #### Manual Setup (if needed)
 ```bash
-# Create a proxy to access the NodePort service externally
-socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 &
+# Get minikube IP
+MINIKUBE_IP=$(minikube ip)
 
-# To make it persistent
-nohup socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 > /tmp/socat.log 2>&1 &
-disown
+# Create iptables forwarding rule (port 8080 -> minikube:30080)
+sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
+
+# Enable IP forwarding
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 ```
 
-**Note:** We use port 8080 to avoid needing sudo permissions. The GitHub Actions workflow handles this automatically.
-
-### 10. Deployment
+### 9. Deployment
 
 #### Automated Deployment (Recommended)
 The GitHub Actions workflow automatically:
@@ -184,7 +174,7 @@ kubectl get ingress
 kubectl get hpa
 ```
 
-### 11. Access Your Application
+### 10. Access Your Application
 
 #### Via Automated Proxy (GitHub Actions)
 The workflow automatically sets up a proxy on port 8080:
@@ -235,23 +225,23 @@ kubectl get ingress
 kubectl describe ingress nginx-ingress
 ```
 
-### Socat Proxy Troubleshooting
+### iptables Troubleshooting
 ```bash
-# Check if socat is running
-ps aux | grep socat
+# Check current iptables NAT rules
+sudo iptables -t nat -L PREROUTING -n
 
-# Check if port 8080 is listening
-netstat -tlnp | grep 8080
+# Remove the forwarding rule
+MINIKUBE_IP=$(minikube ip)
+sudo iptables -t nat -D PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
 
-# Kill socat processes
-pkill -f "TCP-LISTEN:8080"
+# Re-add the forwarding rule
+sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
 
-# Restart socat manually
-nohup socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 > /tmp/socat.log 2>&1 &
-disown
+# Check if IP forwarding is enabled
+cat /proc/sys/net/ipv4/ip_forward
 
-# Check socat logs
-tail -f /tmp/socat.log
+# Enable IP forwarding
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 ```
 
 ### Minikube Troubleshooting
@@ -282,10 +272,10 @@ minikube delete
 
 ## Notes
 
-- The application will be available on port 8080 (automatically configured by GitHub Actions)
+- The application will be available on port 8080 (automatically configured by GitHub Actions using iptables)
 - Direct access to minikube NodePort is available on port 30080
 - HPA will scale pods between 2-10 replicas based on CPU usage (50% threshold)
 - The GitHub Actions workflow automatically updates the deployment image reference
-- Socat proxy persists after deployment and survives server reboots
+- iptables forwarding rules persist without requiring any running processes (more reliable than socat)
 - Make sure to replace placeholder values (YOUR-USERNAME, YOUR-REPO, etc.) with actual values
 - For production deployments, consider using LoadBalancer or proper Ingress with TLS

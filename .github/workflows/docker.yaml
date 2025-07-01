@@ -43,16 +43,27 @@ jobs:
       run: |
         # Get minikube IP
         MINIKUBE_IP=$(minikube ip)
-
-        # Remove any existing rule for port 8080
+        echo "Minikube IP: ${MINIKUBE_IP}"
+        
+        # Remove any existing rules for port 8080
         sudo iptables -t nat -D PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080 2>/dev/null || true
-
-        # Add new forwarding rule
+        sudo iptables -t nat -D OUTPUT -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080 2>/dev/null || true
+        
+        # Add forwarding rules (PREROUTING for external, OUTPUT for localhost)
         sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
-
-        # Enable forwarding if not already enabled
+        sudo iptables -t nat -A OUTPUT -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
+        
+        # Enable forwarding
         echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
-
-        # Test it works
-        sleep 3
-        curl http://localhost:8080
+        
+        # Wait for service to be ready and test
+        echo "Waiting for service to be ready..."
+        sleep 5
+        
+        # Test direct minikube access first
+        echo "Testing direct minikube access..."
+        curl -f http://${MINIKUBE_IP}:30080 || echo "Direct access failed"
+        
+        # Test localhost forwarding
+        echo "Testing localhost forwarding..."
+        curl -f http://localhost:8080
