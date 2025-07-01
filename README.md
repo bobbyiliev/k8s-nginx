@@ -17,8 +17,8 @@ A simple Kubernetes nginx deployment with automated CI/CD using GitHub Actions, 
 # Update system packages
 sudo apt update && sudo apt upgrade -y
 
-# Install essential packages
-sudo apt install -y curl wget git vim htop net-tools
+# Install essential packages (including socat for port forwarding)
+sudo apt install -y curl wget git vim htop net-tools socat
 
 # Create a non-root user (if not already exists)
 sudo useradd -m -s /bin/bash k8s-user
@@ -123,19 +123,15 @@ Add the following secrets to your GitHub repository (Settings → Secrets and va
 
 ### 8. Network Access Configuration
 
-The GitHub Actions workflow automatically sets up port forwarding using kubectl.
+The GitHub Actions workflow automatically sets up port forwarding using socat (much simpler than kubectl!).
 
 #### Manual Setup (if needed)
 ```bash
-# Forward service port 80 to localhost:8080
-kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 &
-
-# To make it persistent
-nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
-disown
+# Forward port 80 to minikube NodePort 30080
+socat TCP-LISTEN:80,fork,reuseaddr,bind=0.0.0.0 TCP:$(minikube ip):30080 &
 ```
 
-**Note:** This uses the standard Kubernetes port-forwarding method - much simpler and more reliable than iptables or socat.
+That's it! One simple command instead of complicated kubectl port-forward setup.
 
 ### 9. Deployment
 
@@ -144,7 +140,7 @@ The GitHub Actions workflow automatically:
 - Builds and pushes the Docker image to your Docker Hub
 - Updates the deployment.yaml with your image reference  
 - Deploys to Kubernetes
-- Sets up external access on port 8080
+- Sets up external access on port 80 using socat
 
 Just push to the main branch and everything happens automatically!
 
@@ -172,18 +168,21 @@ kubectl get pods
 kubectl get services
 kubectl get ingress
 kubectl get hpa
+
+# Setup port forwarding manually
+socat TCP-LISTEN:80,fork,reuseaddr,bind=0.0.0.0 TCP:$(minikube ip):30080 &
 ```
 
 ### 10. Access Your Application
 
 #### Via Automated Port Forward (GitHub Actions)
-The workflow automatically sets up kubectl port forwarding on port 8080:
+The workflow automatically sets up socat port forwarding on port 80:
 ```bash
 # Access via server IP
-curl http://YOUR-SERVER-IP:8080
+curl http://YOUR-SERVER-IP:80
 ```
 
-#### Via NodePort (manual access)
+#### Via NodePort (direct access)
 ```bash
 # Access via minikube IP directly
 curl http://$(minikube ip):30080
@@ -244,21 +243,20 @@ kubectl describe ingress nginx-ingress
 
 ### Port Forward Troubleshooting
 ```bash
-# Check if port-forward is running
-ps aux | grep "port-forward"
+# Check if socat is running
+ps aux | grep socat
 
-# Check if port 8080 is listening
-netstat -tlnp | grep 8080
+# Check if port 80 is listening
+netstat -tlnp | grep 80
 
-# Kill existing port-forward processes
-pkill -f "port-forward.*8080"
+# Stop port forwarding
+sudo pkill -f "80"
 
-# Restart port-forward manually
-nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
-disown
+# Restart port forwarding
+socat TCP-LISTEN:80,fork,reuseaddr,bind=0.0.0.0 TCP:$(minikube ip):30080 &
 
-# Check port-forward logs
-tail -f /tmp/port-forward.log
+# Test the connection
+curl http://localhost:80
 ```
 
 ### Minikube Troubleshooting
@@ -277,6 +275,9 @@ minikube dashboard
 ## Cleanup
 
 ```bash
+# Stop port forwarding
+sudo pkill -f "80"
+
 # Delete Kubernetes resources
 kubectl delete -f k8s/
 
@@ -289,10 +290,10 @@ minikube delete
 
 ## Notes
 
-- The application will be available on port 8080 (automatically configured by GitHub Actions using kubectl port-forward)
+- The application will be available on port 80 (automatically configured by GitHub Actions using socat)
 - Direct access to minikube NodePort is available on port 30080
 - HPA will scale pods between 2-10 replicas based on CPU usage (50% threshold)
 - The GitHub Actions workflow automatically updates the deployment image reference
-- kubectl port-forward is the standard Kubernetes way to expose services locally - simple and reliable
+- Socat is much simpler and more reliable than kubectl port-forward for demos
 - Make sure to replace placeholder values (YOUR-USERNAME, YOUR-REPO, etc.) with actual values
 - For production deployments, consider using LoadBalancer or proper Ingress with TLS
