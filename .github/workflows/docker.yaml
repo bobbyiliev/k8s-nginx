@@ -39,16 +39,20 @@ jobs:
         kubectl rollout restart deployment/nginx-deployment
         kubectl rollout status deployment/nginx-deployment
 
-    - name: Setup socat proxy
+    - name: Setup iptables forwarding
       run: |
-        # Kill existing socat on port 8080
-        pkill -f "TCP-LISTEN:8080" || true
-        sleep 2
+        # Get minikube IP
+        MINIKUBE_IP=$(minikube ip)
 
-        # Start socat proxy in a way that survives job completion
-        nohup socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 > /tmp/socat.log 2>&1 &
-        disown
-        sleep 3
+        # Remove any existing rule for port 8080
+        sudo iptables -t nat -D PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080 2>/dev/null || true
+
+        # Add new forwarding rule
+        sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
+
+        # Enable forwarding if not already enabled
+        echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
         # Test it works
+        sleep 3
         curl http://localhost:8080
