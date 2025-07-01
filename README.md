@@ -133,32 +133,30 @@ Add the following secrets to your GitHub repository (Settings → Secrets and va
 
 ### 9. Network Access Configuration
 
-#### Option 1: Using socat for External Access
+The GitHub Actions workflow automatically sets up external access using socat on port 8080.
+
+#### Manual Setup (if needed)
 ```bash
 # Create a proxy to access the NodePort service externally
-sudo socat TCP-LISTEN:30080,fork TCP:$(minikube ip):30080 &
+socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 &
 
-# Make it persistent (add to /etc/rc.local or create a systemd service)
-echo "sudo socat TCP-LISTEN:30080,fork TCP:$(minikube ip):30080 &" | sudo tee -a /etc/rc.local
+# To make it persistent
+nohup socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 > /tmp/socat.log 2>&1 &
+disown
 ```
 
-#### Option 2: Configure in CI/CD (Recommended)
-Add this step to your GitHub Actions workflow after deployment:
-
-```yaml
-- name: Setup External Access
-  run: |
-    # Get minikube IP
-    MINIKUBE_IP=$(minikube ip)
-
-    # Setup socat proxy in background
-    sudo socat TCP-LISTEN:30080,fork TCP:${MINIKUBE_IP}:30080 &
-
-    # Or use kubectl port-forward for testing
-    # kubectl port-forward --address 0.0.0.0 service/nginx-service 8080:80 &
-```
+**Note:** We use port 8080 to avoid needing sudo permissions. The GitHub Actions workflow handles this automatically.
 
 ### 10. Deployment
+
+#### Automated Deployment (Recommended)
+The GitHub Actions workflow automatically:
+- Builds and pushes the Docker image to your Docker Hub
+- Updates the deployment.yaml with your image reference  
+- Deploys to Kubernetes
+- Sets up external access on port 8080
+
+Just push to the main branch and everything happens automatically!
 
 #### Manual Deployment
 ```bash
@@ -166,9 +164,12 @@ Add this step to your GitHub Actions workflow after deployment:
 git clone https://github.com/YOUR-USERNAME/k8s-nginx.git
 cd k8s-nginx
 
-# Build and push Docker image
+# Build and push Docker image (replace with your Docker Hub username)
 docker build -t YOUR-DOCKERHUB-USERNAME/nginx-hello:latest .
 docker push YOUR-DOCKERHUB-USERNAME/nginx-hello:latest
+
+# Update deployment.yaml to use your image
+sed -i "s|bobbyiliev/nginx-hello:latest|YOUR-DOCKERHUB-USERNAME/nginx-hello:latest|" k8s/deployment.yaml
 
 # Deploy to Kubernetes
 kubectl apply -f k8s/deployment.yaml
@@ -183,23 +184,18 @@ kubectl get ingress
 kubectl get hpa
 ```
 
-#### Automated Deployment
-The GitHub Actions workflow will automatically build and deploy when you push to the main branch.
-
 ### 11. Access Your Application
 
-#### Via NodePort (with socat proxy)
+#### Via Automated Proxy (GitHub Actions)
+The workflow automatically sets up a proxy on port 8080:
 ```bash
 # Access via server IP
-curl http://YOUR-SERVER-IP:30080
+curl http://YOUR-SERVER-IP:8080
 ```
 
-#### Via Minikube IP
+#### Via NodePort (manual access)
 ```bash
-# Get minikube IP
-minikube ip
-
-# Access directly
+# Access via minikube IP directly
 curl http://$(minikube ip):30080
 ```
 
@@ -239,6 +235,25 @@ kubectl get ingress
 kubectl describe ingress nginx-ingress
 ```
 
+### Socat Proxy Troubleshooting
+```bash
+# Check if socat is running
+ps aux | grep socat
+
+# Check if port 8080 is listening
+netstat -tlnp | grep 8080
+
+# Kill socat processes
+pkill -f "TCP-LISTEN:8080"
+
+# Restart socat manually
+nohup socat TCP-LISTEN:8080,fork TCP:$(minikube ip):30080 > /tmp/socat.log 2>&1 &
+disown
+
+# Check socat logs
+tail -f /tmp/socat.log
+```
+
 ### Minikube Troubleshooting
 ```bash
 # Restart minikube
@@ -267,8 +282,10 @@ minikube delete
 
 ## Notes
 
-- The application will be available on port 30080
+- The application will be available on port 8080 (automatically configured by GitHub Actions)
+- Direct access to minikube NodePort is available on port 30080
 - HPA will scale pods between 2-10 replicas based on CPU usage (50% threshold)
-- The Docker image `bobbyiliev/nginx-hello:latest` is used in the deployment
+- The GitHub Actions workflow automatically updates the deployment image reference
+- Socat proxy persists after deployment and survives server reboots
 - Make sure to replace placeholder values (YOUR-USERNAME, YOUR-REPO, etc.) with actual values
 - For production deployments, consider using LoadBalancer or proper Ingress with TLS
