@@ -123,19 +123,19 @@ Add the following secrets to your GitHub repository (Settings → Secrets and va
 
 ### 8. Network Access Configuration
 
-The GitHub Actions workflow automatically sets up port forwarding using iptables rules.
+The GitHub Actions workflow automatically sets up port forwarding using kubectl.
 
 #### Manual Setup (if needed)
 ```bash
-# Get minikube IP
-MINIKUBE_IP=$(minikube ip)
+# Forward service port 80 to localhost:8080
+kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 &
 
-# Create iptables forwarding rule (port 8080 -> minikube:30080)
-sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
-
-# Enable IP forwarding
-echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+# To make it persistent
+nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
+disown
 ```
+
+**Note:** This uses the standard Kubernetes port-forwarding method - much simpler and more reliable than iptables or socat.
 
 ### 9. Deployment
 
@@ -176,8 +176,8 @@ kubectl get hpa
 
 ### 10. Access Your Application
 
-#### Via Automated Proxy (GitHub Actions)
-The workflow automatically sets up a proxy on port 8080:
+#### Via Automated Port Forward (GitHub Actions)
+The workflow automatically sets up kubectl port forwarding on port 8080:
 ```bash
 # Access via server IP
 curl http://YOUR-SERVER-IP:8080
@@ -196,6 +196,23 @@ echo "$(minikube ip) nginx.local" | sudo tee -a /etc/hosts
 
 # Access via ingress
 curl http://nginx.local
+```
+
+## Project Structure
+
+```
+k8s-nginx/
+├── .github/workflows/
+│   ├── docker.yaml          # Main CI/CD pipeline
+│   └── validate.yaml        # Runner validation
+├── k8s/
+│   ├── deployment.yaml      # Nginx deployment
+│   ├── service.yaml         # NodePort service
+│   ├── ingress.yaml         # Ingress configuration
+│   └── hpa.yaml            # Horizontal Pod Autoscaler
+├── Dockerfile              # Container definition
+├── index.html             # Simple HTML page
+└── README.md              # This file
 ```
 
 ## Monitoring and Troubleshooting
@@ -225,23 +242,23 @@ kubectl get ingress
 kubectl describe ingress nginx-ingress
 ```
 
-### iptables Troubleshooting
+### Port Forward Troubleshooting
 ```bash
-# Check current iptables NAT rules
-sudo iptables -t nat -L PREROUTING -n
+# Check if port-forward is running
+ps aux | grep "port-forward"
 
-# Remove the forwarding rule
-MINIKUBE_IP=$(minikube ip)
-sudo iptables -t nat -D PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
+# Check if port 8080 is listening
+netstat -tlnp | grep 8080
 
-# Re-add the forwarding rule
-sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
+# Kill existing port-forward processes
+pkill -f "port-forward.*8080"
 
-# Check if IP forwarding is enabled
-cat /proc/sys/net/ipv4/ip_forward
+# Restart port-forward manually
+nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
+disown
 
-# Enable IP forwarding
-echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+# Check port-forward logs
+tail -f /tmp/port-forward.log
 ```
 
 ### Minikube Troubleshooting
@@ -272,10 +289,10 @@ minikube delete
 
 ## Notes
 
-- The application will be available on port 8080 (automatically configured by GitHub Actions using iptables)
+- The application will be available on port 8080 (automatically configured by GitHub Actions using kubectl port-forward)
 - Direct access to minikube NodePort is available on port 30080
 - HPA will scale pods between 2-10 replicas based on CPU usage (50% threshold)
 - The GitHub Actions workflow automatically updates the deployment image reference
-- iptables forwarding rules persist without requiring any running processes (more reliable than socat)
+- kubectl port-forward is the standard Kubernetes way to expose services locally - simple and reliable
 - Make sure to replace placeholder values (YOUR-USERNAME, YOUR-REPO, etc.) with actual values
 - For production deployments, consider using LoadBalancer or proper Ingress with TLS

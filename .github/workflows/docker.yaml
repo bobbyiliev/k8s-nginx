@@ -39,31 +39,18 @@ jobs:
         kubectl rollout restart deployment/nginx-deployment
         kubectl rollout status deployment/nginx-deployment
 
-    - name: Setup iptables forwarding
+    - name: Setup port forwarding
       run: |
-        # Get minikube IP
-        MINIKUBE_IP=$(minikube ip)
-        echo "Minikube IP: ${MINIKUBE_IP}"
+        # Kill any existing port-forward on 8080
+        pkill -f "port-forward.*8080" || true
+        sleep 2
         
-        # Remove any existing rules for port 8080
-        sudo iptables -t nat -D PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080 2>/dev/null || true
-        sudo iptables -t nat -D OUTPUT -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080 2>/dev/null || true
+        # Start kubectl port-forward in background
+        nohup kubectl port-forward --address=0.0.0.0 service/nginx-service 8080:80 > /tmp/port-forward.log 2>&1 &
+        disown
         
-        # Add forwarding rules (PREROUTING for external, OUTPUT for localhost)
-        sudo iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
-        sudo iptables -t nat -A OUTPUT -p tcp --dport 8080 -j DNAT --to-destination ${MINIKUBE_IP}:30080
-        
-        # Enable forwarding
-        echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
-        
-        # Wait for service to be ready and test
-        echo "Waiting for service to be ready..."
+        # Wait for port-forward to start
         sleep 5
         
-        # Test direct minikube access first
-        echo "Testing direct minikube access..."
-        curl -f http://${MINIKUBE_IP}:30080 || echo "Direct access failed"
-        
-        # Test localhost forwarding
-        echo "Testing localhost forwarding..."
-        curl -f http://localhost:8080
+        # Test it works
+        curl http://localhost:8080
