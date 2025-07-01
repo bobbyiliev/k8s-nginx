@@ -23,9 +23,47 @@ jobs:
     - name: Push Image
       run: docker push ${{ secrets.DOCKER_USERNAME }}/nginx-hello:latest
 
+    - name: Update deployment image
+      run: |
+        # Update the deployment.yaml to use the correct image
+        sed -i "s|image: bobbyiliev/nginx-hello:latest|image: ${{ secrets.DOCKER_USERNAME }}/nginx-hello:latest|g" k8s/deployment.yaml
+
     - name: Deploy to Kubernetes
       run: |
         kubectl apply -f k8s/deployment.yaml
         kubectl apply -f k8s/service.yaml
         kubectl apply -f k8s/ingress.yaml
         kubectl apply -f k8s/hpa.yaml
+
+    - name: Restart deployment to pull new image
+      run: |
+        kubectl rollout restart deployment/nginx-deployment
+        kubectl rollout status deployment/nginx-deployment
+
+    - name: Setup External Access (Optional)
+      run: |
+        # Kill any existing socat processes on port 30080
+        sudo pkill -f "socat.*30080" || true
+
+        # Get minikube IP and setup proxy
+        MINIKUBE_IP=$(minikube ip)
+        echo "Setting up proxy: 0.0.0.0:30080 -> ${MINIKUBE_IP}:30080"
+
+        # Start socat in background
+        nohup sudo socat TCP-LISTEN:30080,fork,reuseaddr TCP:${MINIKUBE_IP}:30080 > /tmp/socat.log 2>&1 &
+
+        # Verify the service is accessible
+        sleep 5
+        curl -f http://localhost:30080 || echo "Service not yet ready"
+
+    - name: Display Access Information
+      run: |
+        echo "=== Deployment Complete ==="
+        echo "NodePort Service: http://$(hostname -I | awk '{print $1}'):30080"
+        echo "Minikube IP: http://$(minikube ip):30080"
+        echo ""
+        echo "Pod Status:"
+        kubectl get pods -l app=nginx
+        echo ""
+        echo "Service Status:"
+        kubectl get svc nginx-service
