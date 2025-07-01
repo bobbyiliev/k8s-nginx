@@ -23,10 +23,6 @@ jobs:
     - name: Push Image
       run: docker push ${{ secrets.DOCKER_USERNAME }}/nginx-hello:latest
 
-    - name: Update deployment image
-      run: |
-        sed -i "s|image: bobbyiliev/nginx-hello:latest|image: ${{ secrets.DOCKER_USERNAME }}/nginx-hello:latest|g" k8s/deployment.yaml
-
     - name: Deploy to Kubernetes
       run: |
         kubectl apply -f k8s/deployment.yaml
